@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="Local-first day trading capital and journal tracker">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>Trading Capital Tracker</title>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Trading Capital Tracker</h1>
+      <p>Keep active trading separate from long-term holdings.</p>
+    </div>
+    <button id="installBtn" class="ghost hidden">Install App</button>
+  </header>
+
+  <main>
+    <section class="cards" aria-label="Account summary">
+      <article class="card"><span>Trading capital</span><strong id="capitalValue">$0.00</strong><small>Contributions + realized P/L</small></article>
+      <article class="card"><span>Settled cash</span><strong id="settledCash">$0.00</strong><small>Available for new trades</small></article>
+      <article class="card"><span>Awaiting settlement</span><strong id="unsettledCash">$0.00</strong><small>Sold stock/ETF proceeds</small></article>
+      <article class="card"><span>Open cost basis</span><strong id="openBasis">$0.00</strong><small>Capital currently deployed</small></article>
+      <article class="card"><span>Realized P/L</span><strong id="realizedPL">$0.00</strong><small>Closed trades only</small></article>
+      <article class="card"><span>Trading return</span><strong id="returnPct">0.00%</strong><small>Realized P/L ÷ contributions</small></article>
+    </section>
+
+    <section class="layout two">
+      <article class="panel">
+        <div class="panel-head"><h2>Capital ledger</h2><button id="addContributionBtn" class="primary">Add contribution</button></div>
+        <p class="muted">Start with $500, then record each additional deposit separately so deposits are never mistaken for profits.</p>
+        <div class="table-wrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Note</th><th></th></tr></thead><tbody id="contributionRows"></tbody></table></div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head"><h2>Risk guard</h2></div>
+        <div class="settings-grid">
+          <label>Risk per trade (%)<input id="riskPct" type="number" min="0.01" max="20" step="0.01"></label>
+          <label>Daily loss limit (%)<input id="dailyLossPct" type="number" min="0.01" max="50" step="0.01"></label>
+          <label>Authorized capital ceiling ($)<input id="capitalCeiling" type="number" min="0" step="0.01"></label>
+          <button id="saveSettings" class="primary">Save risk settings</button>
+        </div>
+        <div class="risk-results">
+          <div><span>Max loss / trade</span><strong id="maxRiskTrade">$0.00</strong></div>
+          <div><span>Daily loss limit</span><strong id="maxRiskDay">$0.00</strong></div>
+          <div><span>Today's realized P/L</span><strong id="todayPL">$0.00</strong></div>
+        </div>
+        <div id="dailyWarning" class="warning hidden"></div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head wrap"><h2>Trade journal</h2><div class="actions"><button id="addTradeBtn" class="primary">Add trade</button><button id="refreshSettlementBtn" class="ghost">Refresh settlements</button></div></div>
+      <div class="filters">
+        <select id="filterAsset" aria-label="Filter asset"><option value="all">All assets</option><option>Stock</option><option>ETF</option><option>Crypto</option></select>
+        <select id="filterStatus" aria-label="Filter status"><option value="all">All statuses</option><option value="open">Open</option><option value="awaiting">Awaiting settlement</option><option value="settled">Settled</option></select>
+        <input id="filterSymbol" type="search" placeholder="Filter ticker">
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Symbol</th><th>Asset</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Stop</th><th>Target</th><th>P/L</th><th>Status</th><th>Settlement</th><th></th></tr></thead><tbody id="tradeRows"></tbody></table></div>
+      <div id="emptyTrades" class="empty">No trades yet.</div>
+    </section>
+
+    <section class="layout two">
+      <article class="panel">
+        <div class="panel-head"><h2>Position size calculator</h2></div>
+        <div class="settings-grid">
+          <label>Entry price<input id="calcEntry" type="number" min="0" step="0.01"></label>
+          <label>Stop price<input id="calcStop" type="number" min="0" step="0.01"></label>
+          <button id="calcPosition" class="primary">Calculate</button>
+        </div>
+        <div class="risk-results">
+          <div><span>Risk/share</span><strong id="calcRiskShare">$0.00</strong></div>
+          <div><span>Max shares</span><strong id="calcShares">0</strong></div>
+          <div><span>Position value</span><strong id="calcPositionValue">$0.00</strong></div>
+        </div>
+        <p id="calcNote" class="muted"></p>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head"><h2>Performance</h2></div>
+        <div class="stats-grid">
+          <div><span>Closed trades</span><strong id="closedTrades">0</strong></div>
+          <div><span>Win rate</span><strong id="winRate">0.0%</strong></div>
+          <div><span>Avg winner</span><strong id="avgWin">$0.00</strong></div>
+          <div><span>Avg loser</span><strong id="avgLoss">$0.00</strong></div>
+          <div><span>Profit factor</span><strong id="profitFactor">—</strong></div>
+          <div><span>Largest drawdown*</span><strong id="maxDrawdown">$0.00</strong></div>
+        </div>
+        <small class="muted">*Based on cumulative realized P/L ordered by exit date.</small>
+      </article>
+    </section>
+
+    <section class="layout two">
+      <article class="panel">
+        <div class="panel-head"><h2>Strategy breakdown</h2></div>
+        <div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Net P/L</th></tr></thead><tbody id="strategyRows"></tbody></table></div>
+      </article>
+      <article class="panel">
+        <div class="panel-head"><h2>Data & backups</h2></div>
+        <div class="backup-actions">
+          <button id="exportJson" class="primary">Export backup (.json)</button>
+          <button id="exportCsv" class="ghost">Export trades (.csv)</button>
+          <label class="file-button">Import backup<input id="importJson" type="file" accept="application/json,.json"></label>
+          <button id="resetData" class="danger">Reset all data</button>
+        </div>
+        <p class="muted">Your records are stored locally in this browser. Export backups regularly, especially before changing devices or clearing browser data.</p>
+      </article>
+    </section>
+  </main>
+
+  <dialog id="contributionDialog">
+    <form method="dialog" id="contributionForm" class="dialog-form">
+      <div class="dialog-head"><h2>Add contribution</h2><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+      <label>Date<input id="contribDate" type="date" required></label>
+      <label>Amount ($)<input id="contribAmount" type="number" min="0.01" step="0.01" value="500" required></label>
+      <label>Note<input id="contribNote" type="text" placeholder="Monthly contribution"></label>
+      <div class="dialog-actions"><button value="cancel" class="ghost">Cancel</button><button id="saveContribution" value="default" class="primary">Save</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="tradeDialog">
+    <form method="dialog" id="tradeForm" class="dialog-form wide">
+      <div class="dialog-head"><h2 id="tradeDialogTitle">Add trade</h2><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+      <input id="editTradeId" type="hidden">
+      <div class="form-grid">
+        <label>Entry date<input id="tradeDate" type="date" required></label>
+        <label>Symbol<input id="tradeSymbol" type="text" maxlength="15" placeholder="AAPL" required></label>
+        <label>Asset<select id="tradeAsset"><option>Stock</option><option>ETF</option><option>Crypto</option></select></label>
+        <label>Strategy<input id="tradeStrategy" type="text" list="strategyList" placeholder="Trend pullback"></label>
+        <datalist id="strategyList"><option value="Trend pullback"><option value="Breakout"><option value="VWAP bounce"><option value="Range reversal"><option value="Other"></datalist>
+        <label>Quantity<input id="tradeQty" type="number" min="0.00000001" step="any" required></label>
+        <label>Entry price<input id="tradeEntry" type="number" min="0.00000001" step="any" required></label>
+        <label>Planned stop<input id="tradeStop" type="number" min="0" step="any"></label>
+        <label>Planned target<input id="tradeTarget" type="number" min="0" step="any"></label>
+        <label>Exit date<input id="tradeExitDate" type="date"></label>
+        <label>Exit price<input id="tradeExit" type="number" min="0" step="any"></label>
+        <label>Settlement date<input id="tradeSettlement" type="date"></label>
+        <label>Fees ($)<input id="tradeFees" type="number" min="0" step="0.01" value="0"></label>
+      </div>
+      <label>Notes<textarea id="tradeNotes" rows="3" placeholder="Why you entered, what you saw, what you learned..."></textarea></label>
+      <div id="tradeValidation" class="warning hidden"></div>
+      <div class="dialog-actions"><button value="cancel" class="ghost">Cancel</button><button id="saveTrade" value="default" class="primary">Save trade</button></div>
+    </form>
+  </dialog>
+
+  <footer>For journaling and risk tracking only. Not investment advice. Settlement-date estimates skip weekends but not exchange holidays; adjust the date manually when necessary.</footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
