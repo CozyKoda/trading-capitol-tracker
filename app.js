@@ -4,7 +4,7 @@
   const KEY = 'tradingCapitalTracker.v2';
   const OLD_KEY = 'tradingCapitalTracker.v1';
   const DEFAULT = {
-    version: 2,
+    version: 2.1,
     contributions: [],
     trades: [],
     settings: { riskPct: 0.5, dailyLossPct: 1, capitalMode: 'auto', manualCapitalCap: 500 }
@@ -94,6 +94,18 @@
   function exitPL(t,e) { return (Number(e.price) - Number(t.entryPrice)) * Number(e.qty) - Number(e.fees || 0); }
   function tradeRealizedPL(t) { return t.exits.reduce((a,e) => a + exitPL(t,e), 0); }
   function totalRealizedPL() { return state.trades.reduce((a,t) => a + tradeRealizedPL(t), 0); }
+  function averageExitPrice(t) {
+    const q = soldQty(t);
+    return q > 0 ? t.exits.reduce((a,e) => a + Number(e.price || 0) * Number(e.qty || 0), 0) / q : 0;
+  }
+  function exitDateSummary(t) {
+    if (!t.exits.length) return '—';
+    const sorted = [...t.exits].filter(e => e.date).sort((a,b) => dateValue(a.date)-dateValue(b.date) || String(a.time||'').localeCompare(String(b.time||'')));
+    if (!sorted.length) return '—';
+    const first = sorted[0], last = sorted[sorted.length-1];
+    if (sorted.length === 1) return `${first.date}${first.time ? `<br><small>${esc(first.time)}</small>` : ''}`;
+    return `${last.date}${last.time ? `<br><small>${esc(last.time)}</small>` : ''}<br><small>${sorted.length} exits</small>`;
+  }
   function exitProceeds(e) { return Number(e.price) * Number(e.qty) - Number(e.fees || 0); }
   function exitIsSettled(t,e) { return t.asset === 'Crypto' || (!!e.settlementDate && e.settlementDate <= today()); }
   function pendingExits(t) { return t.exits.filter(e => !exitIsSettled(t,e)); }
@@ -243,7 +255,7 @@
     for (const t of list) {
       const pl=tradeRealizedPL(t), st=tradeStatus(t), rem=remainingQty(t);
       const tr=document.createElement('tr');
-      tr.innerHTML=`<td>${esc(t.entryDate)}${t.entryTime?`<br><small>${esc(t.entryTime)}</small>`:''}</td><td><strong>${esc(t.symbol)}</strong></td><td>${esc(t.asset)}</td><td>${fmt(t.qty)}</td><td>${fmt(rem)}</td><td>${money(t.entryPrice)}</td><td>${t.stop?money(t.stop):'—'}</td><td>${t.target?money(t.target):'—'}</td><td class="${pl>0?'pos':pl<0?'neg':''}">${t.exits.length?money(pl):'—'}</td><td><span class="status">${st==='open'?'Open':st==='partial'?'Partial':st==='awaiting'?'Awaiting':'Settled'}</span></td><td>${esc(settlementDisplay(t))}</td><td><div class="row-actions">${rem>0?`<button class="close-action" data-close="${t.id}">Close</button>`:''}<button data-history="${t.id}">Details</button><button data-edit="${t.id}">Edit</button><button data-delete="${t.id}">Delete</button></div></td>`;
+      tr.innerHTML=`<td>${esc(t.entryDate)}${t.entryTime?`<br><small>${esc(t.entryTime)}</small>`:''}</td><td>${exitDateSummary(t)}</td><td><strong>${esc(t.symbol)}</strong></td><td>${esc(t.asset)}</td><td>${fmt(t.qty)}</td><td>${fmt(rem)}</td><td>${money(t.entryPrice)}</td><td>${t.exits.length?money(averageExitPrice(t)):'—'}</td><td>${t.stop?money(t.stop):'—'}</td><td>${t.target?money(t.target):'—'}</td><td class="${pl>0?'pos':pl<0?'neg':''}">${t.exits.length?money(pl):'—'}</td><td><span class="status">${st==='open'?'Open':st==='partial'?'Partial':st==='awaiting'?'Awaiting':'Settled'}</span></td><td>${esc(settlementDisplay(t))}</td><td><div class="row-actions">${rem>0?`<button class="close-action" data-close="${t.id}">Close</button>`:''}<button data-history="${t.id}">Details</button><button data-edit="${t.id}">Edit</button><button data-delete="${t.id}">Delete</button></div></td>`;
       tb.appendChild(tr);
     }
     tb.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>openClose(state.trades.find(t=>t.id===b.dataset.close)));
@@ -316,7 +328,18 @@
   function openTrade(t=null) {
     $('tradeForm').reset(); $('editTradeId').value=t?.id||''; $('tradeDialogTitle').textContent=t?'Edit open-trade details':'Open trade'; $('saveTrade').textContent=t?'Save changes':'Save open trade';
     $('tradeDate').value=t?.entryDate||today(); $('tradeTime').value=t?.entryTime||localTimeString(); $('tradeSymbol').value=t?.symbol||''; $('tradeAsset').value=t?.asset||'Stock'; $('tradeStrategy').value=t?.strategy||'Trend pullback'; $('tradeQty').value=t?.qty||''; $('tradeEntry').value=t?.entryPrice||''; $('tradeStop').value=t?.stop||''; $('tradeTarget').value=t?.target||''; $('tradeQuality').value=t?.quality||''; $('tradeEmotion').value=t?.emotion||''; $('tradeNotes').value=t?.notes||'';
-    $('checkSetup').checked=Boolean(t?.checklist?.setup); $('checkConfirm').checked=Boolean(t?.checklist?.confirm); $('checkSize').checked=Boolean(t?.checklist?.size); $('checkStop').checked=Boolean(t?.checklist?.stop); $('checkTarget').checked=Boolean(t?.checklist?.target); $('tradeValidation').classList.add('hidden'); updateTradeMetrics(); $('tradeDialog').showModal();
+    $('checkSetup').checked=Boolean(t?.checklist?.setup); $('checkConfirm').checked=Boolean(t?.checklist?.confirm); $('checkSize').checked=Boolean(t?.checklist?.size); $('checkStop').checked=Boolean(t?.checklist?.stop); $('checkTarget').checked=Boolean(t?.checklist?.target);
+    const exitSection=$('editExitSection'), exitRows=$('editExitRows'); exitRows.innerHTML='';
+    if(t?.exits?.length){
+      exitSection.classList.remove('hidden');
+      [...t.exits].sort((a,b)=>dateValue(a.date)-dateValue(b.date) || String(a.time||'').localeCompare(String(b.time||''))).forEach(e=>{
+        const row=document.createElement('div'); row.className='exit-edit-row'; const ep=exitPL(t,e);
+        row.innerHTML=`<span>Date<strong>${esc(e.date)}${e.time?` ${esc(e.time)}`:''}</strong></span><span>Qty<strong>${fmt(e.qty)}</strong></span><span>Exit price<strong>${money(e.price)}</strong></span><span>P/L<strong class="${ep>0?'pos':ep<0?'neg':''}">${money(ep)}</strong></span><span>Settlement<strong>${t.asset==='Crypto'?'N/A':esc(e.settlementDate||'—')}</strong></span><span>Fees<strong>${money(e.fees||0)}</strong></span><button type="button" class="ghost" data-edit-exit="${e.id}">Edit sale</button>`;
+        exitRows.appendChild(row);
+      });
+      exitRows.querySelectorAll('[data-edit-exit]').forEach(b=>b.onclick=()=>openEditExit(t,t.exits.find(e=>e.id===b.dataset.editExit)));
+    } else exitSection.classList.add('hidden');
+    $('tradeValidation').classList.add('hidden'); updateTradeMetrics(); $('tradeDialog').showModal();
   }
 
   function openClose(t) {
@@ -325,10 +348,11 @@
 
   function openHistory(t) {
     $('historyTitle').textContent=`${t.symbol} trade details`; const plannedRisk=t.stop?Math.abs(t.entryPrice-t.stop)*t.qty:0; const p=tradeRealizedPL(t); const rr=plannedRisk>0&&t.exits.length?`${(p/plannedRisk).toFixed(2)}R`:'—';
-    let html=`<div class="detail-grid"><div><span>Entry</span><strong>${esc(t.entryDate)} ${esc(t.entryTime||'')}</strong></div><div><span>Quantity</span><strong>${fmt(t.qty)}</strong></div><div><span>Entry price</span><strong>${money(t.entryPrice)}</strong></div><div><span>Strategy</span><strong>${esc(t.strategy)}</strong></div><div><span>Planned stop</span><strong>${t.stop?money(t.stop):'—'}</strong></div><div><span>Planned target</span><strong>${t.target?money(t.target):'—'}</strong></div><div><span>Realized P/L</span><strong class="${p>0?'pos':p<0?'neg':''}">${money(p)}</strong></div><div><span>Realized R</span><strong>${rr}</strong></div><div><span>Remaining</span><strong>${fmt(remainingQty(t))}</strong></div></div>`;
+    const exits=[...t.exits].sort((a,b)=>dateValue(a.date)-dateValue(b.date)||String(a.time||'').localeCompare(String(b.time||''))); const firstExit=exits[0], finalExit=exits[exits.length-1];
+    let html=`<div class="detail-grid"><div><span>Entry</span><strong>${esc(t.entryDate)} ${esc(t.entryTime||'')}</strong></div><div><span>Entry price</span><strong>${money(t.entryPrice)}</strong></div><div><span>First exit</span><strong>${firstExit?`${esc(firstExit.date)} ${esc(firstExit.time||'')}`:'—'}</strong></div><div><span>Final exit</span><strong>${finalExit?`${esc(finalExit.date)} ${esc(finalExit.time||'')}`:'—'}</strong></div><div><span>Avg exit price</span><strong>${t.exits.length?money(averageExitPrice(t)):'—'}</strong></div><div><span>Quantity</span><strong>${fmt(t.qty)}</strong></div><div><span>Strategy</span><strong>${esc(t.strategy)}</strong></div><div><span>Planned stop</span><strong>${t.stop?money(t.stop):'—'}</strong></div><div><span>Planned target</span><strong>${t.target?money(t.target):'—'}</strong></div><div><span>Realized P/L</span><strong class="${p>0?'pos':p<0?'neg':''}">${money(p)}</strong></div><div><span>Realized R</span><strong>${rr}</strong></div><div><span>Remaining</span><strong>${fmt(remainingQty(t))}</strong></div></div>`;
     html+=`<p><strong>Notes:</strong> ${esc(t.notes||'—')}</p>`;
-    if(t.exits.length){html+='<div class="table-wrap"><table class="history-exits"><thead><tr><th>Date</th><th>Qty</th><th>Price</th><th>P/L</th><th>Settlement</th><th>Plan followed</th></tr></thead><tbody>';for(const e of t.exits){const ep=exitPL(t,e);html+=`<tr><td>${esc(e.date)} ${esc(e.time||'')}</td><td>${fmt(e.qty)}</td><td>${money(e.price)}</td><td class="${ep>0?'pos':ep<0?'neg':''}">${money(ep)}</td><td>${t.asset==='Crypto'?'N/A':esc(e.settlementDate||'')}</td><td>${e.followedPlan?'Yes':'No / not recorded'}</td></tr>`;}html+='</tbody></table></div>';}else html+='<p class="muted">No exits recorded yet.</p>';
-    $('historyBody').innerHTML=html; $('historyDialog').showModal();
+    if(t.exits.length){html+='<div class="table-wrap"><table class="history-exits"><thead><tr><th>Exit date/time</th><th>Qty</th><th>Exit price</th><th>Fees</th><th>P/L</th><th>Settlement</th><th>Plan followed</th><th></th></tr></thead><tbody>';for(const e of exits){const ep=exitPL(t,e);html+=`<tr><td>${esc(e.date)} ${esc(e.time||'')}</td><td>${fmt(e.qty)}</td><td>${money(e.price)}</td><td>${money(e.fees||0)}</td><td class="${ep>0?'pos':ep<0?'neg':''}">${money(ep)}</td><td>${t.asset==='Crypto'?'N/A':esc(e.settlementDate||'')}</td><td>${e.followedPlan?'Yes':'No / not recorded'}</td><td><button type="button" data-history-edit-exit="${e.id}">Edit sale</button></td></tr>`;}html+='</tbody></table></div>';}else html+='<p class="muted">No exits recorded yet.</p>';
+    $('historyBody').innerHTML=html; $('historyBody').querySelectorAll('[data-history-edit-exit]').forEach(b=>b.onclick=()=>openEditExit(t,t.exits.find(e=>e.id===b.dataset.historyEditExit))); $('historyDialog').showModal();
   }
 
   function updateTradeMetrics() {
@@ -349,6 +373,19 @@
     const t=state.trades.find(x=>x.id===$('closeTradeId').value); const d=$('closeDate').value; $('closeSettlement').value=t?.asset==='Crypto'?(d||''):(d?settlementDateFor(d):'');
   }
 
+  function openEditExit(t,e) {
+    if(!t||!e)return;
+    if ($('tradeDialog').open) $('tradeDialog').close();
+    if ($('historyDialog').open) $('historyDialog').close();
+    $('editExitTradeId').value=t.id; $('editExitId').value=e.id; $('editExitTitle').textContent=`Edit ${t.symbol} sale`;
+    $('editExitDate').value=e.date||''; $('editExitTime').value=e.time||''; $('editExitQty').value=e.qty; $('editExitPrice').value=e.price; $('editExitFees').value=e.fees||0; $('editExitSettlement').value=t.asset==='Crypto'?(e.date||''):(e.date?settlementDateFor(e.date):''); $('editExitNotes').value=e.notes||''; $('editExitFollowedPlan').checked=Boolean(e.followedPlan); $('editExitValidation').classList.add('hidden');
+    $('editExitDialog').showModal();
+  }
+
+  function updateEditExitSettlement() {
+    const t=state.trades.find(x=>x.id===$('editExitTradeId').value); const d=$('editExitDate').value; $('editExitSettlement').value=t?.asset==='Crypto'?(d||''):(d?settlementDateFor(d):'');
+  }
+
   $('addContributionBtn').onclick=openContribution;
   $('addTradeBtn').onclick=()=>openTrade();
   $('saveContribution').onclick=e=>{e.preventDefault();const amount=Number($('contribAmount').value);if(!(amount>0))return;state.contributions.push({id:uid(),date:$('contribDate').value,amount,note:$('contribNote').value.trim()});$('contributionDialog').close();save();};
@@ -364,18 +401,27 @@
     const date=$('closeDate').value; const ex={id:uid(),date,time:$('closeTime').value,qty,price,fees:Number($('closeFees').value)||0,settlementDate:t.asset==='Crypto'?date:settlementDateFor(date),notes:$('closeNotes').value.trim(),followedPlan:$('closeFollowedPlan').checked}; t.exits.push(ex); $('closeDialog').close(); save();
   };
 
+  $('saveExitEdit').onclick=e=>{
+    e.preventDefault(); const t=state.trades.find(x=>x.id===$('editExitTradeId').value); if(!t)return; const ex=t.exits.find(x=>x.id===$('editExitId').value); if(!ex)return;
+    const qty=Number($('editExitQty').value), price=Number($('editExitPrice').value), otherSold=t.exits.filter(x=>x.id!==ex.id).reduce((a,x)=>a+Number(x.qty||0),0), maxQty=Math.max(0,Number(t.qty)-otherSold);
+    if(!(qty>0)||qty>maxQty+1e-8||!(price>0)||!$('editExitDate').value){ $('editExitValidation').textContent=`Enter a valid date, positive price, and quantity no greater than ${fmt(maxQty)}.`; $('editExitValidation').classList.remove('hidden'); return; }
+    ex.date=$('editExitDate').value; ex.time=$('editExitTime').value; ex.qty=qty; ex.price=price; ex.fees=Number($('editExitFees').value)||0; ex.settlementDate=t.asset==='Crypto'?ex.date:settlementDateFor(ex.date); ex.notes=$('editExitNotes').value.trim(); ex.followedPlan=$('editExitFollowedPlan').checked;
+    $('editExitDialog').close(); $('tradeDialog').close(); $('historyDialog').close(); save();
+  };
+
   $('capitalMode').onchange=()=>{const manual=$('capitalMode').value==='manual';$('manualCapWrap').classList.toggle('hidden',!manual);};
   $('saveSettings').onclick=()=>{state.settings.riskPct=Math.max(.01,Number($('riskPct').value)||.5);state.settings.dailyLossPct=Math.max(.01,Number($('dailyLossPct').value)||1);state.settings.capitalMode=$('capitalMode').value==='manual'?'manual':'auto';state.settings.manualCapitalCap=Math.max(0,Number($('manualCapitalCap').value)||0);save();};
   $('refreshSettlementBtn').onclick=()=>render();
   ['filterAsset','filterStatus','filterSymbol'].forEach(id=>$(id).addEventListener(id==='filterSymbol'?'input':'change',renderTrades));
   ['tradeQty','tradeEntry','tradeStop','tradeTarget'].forEach(id=>$(id).addEventListener('input',updateTradeMetrics));
   $('closeDate').addEventListener('change',updateCloseSettlement);
+  $('editExitDate').addEventListener('change',updateEditExitSettlement);
 
   $('calcPosition').onclick=()=>{const entry=Number($('calcEntry').value),stop=Number($('calcStop').value),target=Number($('calcTarget').value),risk=Math.abs(entry-stop),s=summary(),budget=s.capitalLimit*state.settings.riskPct/100;if(!(entry>0)||!(stop>0)||risk<=0){$('calcNote').textContent='Enter different positive entry and stop prices.';return}let qty=Math.floor(budget/risk);qty=Math.min(qty,Math.floor(s.availableDeploy/entry));qty=Math.max(0,qty);$('calcRiskShare').textContent=money(risk);$('calcShares').textContent=qty;$('calcPositionValue').textContent=money(qty*entry);$('calcRR').textContent=target>0?`1 : ${(Math.abs(target-entry)/risk).toFixed(2)}`:'—';$('calcNote').textContent=qty?`At ${fmt(qty)} shares, planned stop risk is about ${money(qty*risk)}. Available-to-deploy cash is ${money(s.availableDeploy)}.`:'Your current settled cash, capital limit, or risk setting does not support a whole-share position at this price.';};
 
   function download(name,type,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500)}
-  $('exportJson').onclick=()=>download(`trading-tracker-v2-backup-${today()}.json`,'application/json',JSON.stringify(state,null,2));
-  $('exportCsv').onclick=()=>{const rows=[['Entry Date','Entry Time','Symbol','Asset','Strategy','Original Quantity','Entry Price','Stop','Target','Exit Date','Exit Time','Exit Quantity','Exit Price','Fees','Settlement Date','Realized P/L','Followed Plan','Notes'],...allExitRecords().map(r=>[r.trade.entryDate,r.trade.entryTime,r.trade.symbol,r.trade.asset,r.trade.strategy,r.trade.qty,r.trade.entryPrice,r.trade.stop||'',r.trade.target||'',r.exit.date,r.exit.time,r.exit.qty,r.exit.price,r.exit.fees,r.exit.settlementDate,r.pl,r.exit.followedPlan?'Yes':'No',r.exit.notes||r.trade.notes||''])];const csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');download(`trades-v2-${today()}.csv`,'text/csv',csv)};
+  $('exportJson').onclick=()=>download(`trading-tracker-v2.1-backup-${today()}.json`,'application/json',JSON.stringify(state,null,2));
+  $('exportCsv').onclick=()=>{const rows=[['Entry Date','Entry Time','Symbol','Asset','Strategy','Original Quantity','Entry Price','Stop','Target','Exit Date','Exit Time','Exit Quantity','Exit Price','Fees','Settlement Date','Realized P/L','Followed Plan','Notes'],...allExitRecords().map(r=>[r.trade.entryDate,r.trade.entryTime,r.trade.symbol,r.trade.asset,r.trade.strategy,r.trade.qty,r.trade.entryPrice,r.trade.stop||'',r.trade.target||'',r.exit.date,r.exit.time,r.exit.qty,r.exit.price,r.exit.fees,r.exit.settlementDate,r.pl,r.exit.followedPlan?'Yes':'No',r.exit.notes||r.trade.notes||''])];const csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');download(`trades-v2.1-${today()}.csv`,'text/csv',csv)};
   $('importJson').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{const data=JSON.parse(await f.text());if(!data||!Array.isArray(data.contributions)||!Array.isArray(data.trades))throw new Error();if(confirm('Replace current local data with this backup?')){state=normalizeState(data);save()}}catch{alert('That file is not a valid Trading Capital Tracker backup.')}finally{e.target.value=''}};
   $('resetData').onclick=()=>{if(confirm('Reset all app data? This cannot be undone unless you have an exported backup.')){state=clone(DEFAULT);localStorage.removeItem(KEY);save()}};
 
